@@ -37,7 +37,17 @@ def build_diagnostics(summary, results):
 st.title("Algorithmic Hiring Bias Simulator & Audit Tool")
 st.caption("Change the robot's rules, then see who it filters out.")
 
-c1, c2, c3, _ = st.columns((1.1, 1, 1.3, 2.6))
+c1, c2, c3, c4, _ = st.columns((1.1, 1, 1.3, 1.5, 1.1))
+
+with c4:
+    if st.button("Load Sample Applicants", use_container_width=True):
+        sample_path = str(Path(__file__).parent / "sample_applicants.txt")
+        st.session_state.applicants = bias_rules.load_applicants(sample_path)
+        st.session_state.flagged_zips = list(bias_rules.default_zip_codes)
+        st.session_state.results, st.session_state.summary = [], {}
+        st.session_state.status_msg = f"Loaded {len(st.session_state.applicants)} sample applicants and 3 sample ZIP codes. Click Run Audit."
+        st.rerun()
+        
 with c1:
     if st.button("Run Audit", type="primary", use_container_width=True):
         if not st.session_state.applicants:
