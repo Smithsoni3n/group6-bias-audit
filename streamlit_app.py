@@ -43,7 +43,6 @@ for rule_key, default_val in bias_rules.default_rules.items():
 
 
 def sync_to_bias_rules():
-    """Push this user's slider values and flagged ZIPs into bias_rules."""
     for rule_key in bias_rules.default_rules:
         bias_rules.algorithm_rules[rule_key] = st.session_state[rule_key]
     bias_rules.flagged_zip_codes.clear()
@@ -56,49 +55,37 @@ def clear_results():
 
 
 def build_diagnostics(summary, results):
-    """Exact diagnostic builder from main.py using bias_rules explanations."""
-    lines = []
-    lines.append("AUDIT SUMMARY")
-    lines.append("Total applicants: " + str(summary.get("total", 0)))
-    lines.append("Passed the robot: " + str(summary.get("passed", 0)))
-    lines.append("Filtered out by the robot: " + str(summary.get("filtered", 0)))
-    lines.append("Qualified on skills alone: " + str(summary.get("qualified", 0)))
-    lines.append(
-        "Qualified but wrongly filtered: "
-        + str(len(summary.get("wrongly_filtered", ())))
-    )
-    lines.append(
-        str(summary.get("percent_lost", 0.0))
-        + "% of qualified applicants were lost to proxy penalties."
-    )
-    lines.append("")
+    lines = [
+        "AUDIT SUMMARY",
+        f"Total applicants: {summary.get('total', 0)}",
+        f"Passed the robot: {summary.get('passed', 0)}",
+        f"Filtered out by the robot: {summary.get('filtered', 0)}",
+        f"Qualified on skills alone: {summary.get('qualified', 0)}",
+        f"Qualified but wrongly filtered: {len(summary.get('wrongly_filtered', ()))}",
+        f"{summary.get('percent_lost', 0.0)}% of qualified applicants were lost to proxy penalties.",
+        "",
+    ]
 
     if len(summary.get("wrongly_filtered", ())) > 0:
         lines.append("WHO WAS WRONGLY FILTERED, AND WHY")
         for result in results:
             if result.get("wrongly_filtered"):
-                applicant = result.get("applicant", {})
+                app = result.get("applicant", {})
                 lines.append(
-                    "- "
-                    + applicant.get("name", "")
-                    + " (skills "
-                    + str(applicant.get("base_score", 0))
-                    + ", robot score "
-                    + str(result.get("final_score", 0))
-                    + ")"
+                    f"- {app.get('name', '')} (skills {app.get('base_score', 0)}, "
+                    f"robot score {result.get('final_score', 0)})"
                 )
                 for reason in result.get("reasons", ()):
-                    lines.append("    Penalty: " + reason)
-                if applicant.get("note", "") != "":
-                    lines.append("    Background: " + applicant.get("note", ""))
+                    lines.append(f"    Penalty: {reason}")
+                if app.get("note", "") != "":
+                    lines.append(f"    Background: {app.get('note', '')}")
         lines.append("")
 
     lines.append("WHY THIS MATTERS")
     for topic, explanation in bias_rules.bias_explanations.items():
-        lines.append(topic + ": " + explanation)
+        lines.append(f"{topic}: {explanation}")
         lines.append("")
     lines.append(bias_rules.simulation_note)
-
     return "\n".join(lines)
 
 
@@ -117,11 +104,8 @@ with btn_col1:
             st.session_state.results = results
             st.session_state.summary = summary
             st.session_state.status_msg = (
-                "Audit finished: "
-                + str(summary.get("passed", 0))
-                + " passed, "
-                + str(summary.get("filtered", 0))
-                + " filtered out."
+                f"Audit finished: {summary.get('passed', 0)} passed, "
+                f"{summary.get('filtered', 0)} filtered out."
             )
 
 with btn_col2:
@@ -142,20 +126,20 @@ with btn_col3:
             "rules_used": dict(bias_rules.algorithm_rules),
             "flagged_zip_codes": list(bias_rules.flagged_zip_codes),
             "summary": st.session_state.summary,
-            "applicants": [],
+            "applicants": [
+                {
+                    "name": res.get("applicant", {}).get("name", ""),
+                    "zip": res.get("applicant", {}).get("zip", ""),
+                    "gap_months": res.get("applicant", {}).get("gap_months", 0),
+                    "skills_score": res.get("applicant", {}).get("base_score", 0),
+                    "final_score": res.get("final_score", 0),
+                    "outcome": "PASSED" if res.get("robot_passed") else "FILTERED OUT",
+                    "qualified_but_filtered": res.get("wrongly_filtered", False),
+                    "penalties": res.get("reasons", []),
+                }
+                for res in st.session_state.results
+            ],
         }
-        for res in st.session_state.results:
-            app = res.get("applicant", {})
-            report_data["applicants"].append({
-                "name": app.get("name", ""),
-                "zip": app.get("zip", ""),
-                "gap_months": app.get("gap_months", 0),
-                "skills_score": app.get("base_score", 0),
-                "final_score": res.get("final_score", 0),
-                "outcome": "PASSED" if res.get("robot_passed") else "FILTERED OUT",
-                "qualified_but_filtered": res.get("wrongly_filtered", False),
-                "penalties": res.get("reasons", []),
-            })
         st.download_button(
             "Export Report (JSON)",
             data=json.dumps(report_data, indent=4),
@@ -187,42 +171,26 @@ with left:
 
         z_col1, z_col2 = st.columns((2, 1))
         with z_col1:
-            zip_input = st.text_input(
-                "ZIP code",
-                placeholder="5-digit ZIP",
-                label_visibility="collapsed",
-            )
+            zip_input = st.text_input("ZIP code", placeholder="5-digit ZIP", label_visibility="collapsed")
         with z_col2:
             if st.button("Add ZIP", use_container_width=True):
                 clean_zip = zip_input.strip()
                 if not clean_zip.isdigit() or len(clean_zip) != 5:
                     st.error("A ZIP code must be exactly 5 digits.")
                 elif clean_zip in st.session_state.flagged_zips:
-                    st.info(clean_zip + " is already on the list.")
+                    st.info(f"{clean_zip} is already on the list.")
                 else:
                     st.session_state.flagged_zips.append(clean_zip)
                     clear_results()
-                    st.session_state.status_msg = (
-                        "Flagged ZIP code "
-                        + clean_zip
-                        + ". Click Run Audit to see the effect."
-                    )
+                    st.session_state.status_msg = f"Flagged ZIP code {clean_zip}. Click Run Audit to see the effect."
                     st.rerun()
 
         if st.session_state.flagged_zips:
-            selected_zip = st.selectbox(
-                "Pick a ZIP code to remove",
-                st.session_state.flagged_zips,
-                label_visibility="collapsed",
-            )
+            selected_zip = st.selectbox("Pick a ZIP code to remove", st.session_state.flagged_zips, label_visibility="collapsed")
             if st.button("Remove selected ZIP", use_container_width=True):
                 st.session_state.flagged_zips.remove(selected_zip)
                 clear_results()
-                st.session_state.status_msg = (
-                    "Un-flagged ZIP code "
-                    + selected_zip
-                    + ". Click Run Audit to see the effect."
-                )
+                st.session_state.status_msg = f"Un-flagged ZIP code {selected_zip}. Click Run Audit to see the effect."
                 st.rerun()
 
     with st.container(border=True):
@@ -232,26 +200,16 @@ with left:
             zip_val = st.text_input("ZIP code")
             gap_val = st.text_input("Gap (months)")
             score_val = st.text_input("Skills score (0-100)")
-            submitted = st.form_submit_button("Add Applicant", use_container_width=True)
-
-            if submitted:
+            if st.form_submit_button("Add Applicant", use_container_width=True):
                 applicant, error = bias_rules.make_applicant(
-                    name_val,
-                    zip_val,
-                    gap_val,
-                    score_val,
-                    "Applicant added by the user",
+                    name_val, zip_val, gap_val, score_val, "Applicant added by the user"
                 )
                 if error != "":
                     st.error(error)
                 else:
                     st.session_state.applicants.append(applicant)
                     clear_results()
-                    st.session_state.status_msg = (
-                        "Added "
-                        + applicant.get("name", "")
-                        + ". Click Run Audit to screen everyone."
-                    )
+                    st.session_state.status_msg = f"Added {applicant.get('name', '')}. Click Run Audit to screen everyone."
                     st.rerun()
 
 with right:
@@ -260,4 +218,29 @@ with right:
 
     if len(st.session_state.results) == 0:
         for app in st.session_state.applicants:
-            table_rows.append({
+            table_rows.append(
+                dict(
+                    Applicant=app.get("name", ""),
+                    ZIP=app.get("zip", ""),
+                    Gap_mo=app.get("gap_months", 0),
+                    Skills=app.get("base_score", 0),
+                    Final="-",
+                    Result="Not screened yet",
+                    Audit_flag="",
+                )
+            )
+    else:
+        for res in st.session_state.results:
+            app = res.get("applicant", {})
+            outcome = "PASSED" if res.get("robot_passed") else "FILTERED OUT"
+            if res.get("wrongly_filtered"):
+                audit_flag = "Qualified but rejected"
+            elif not res.get("skills_passed"):
+                audit_flag = "Below passing on skills"
+            else:
+                audit_flag = ""
+            table_rows.append(
+                dict(
+                    Applicant=app.get("name", ""),
+                    ZIP=app.get("zip", ""),
+                    Gap_mo=app.get("gap_months", 0),
