@@ -42,7 +42,8 @@ c1, c2, c3, c4, _ = st.columns((1.1, 1, 1.3, 1.5, 1.1))
 with c4:
     if st.button("Load Sample Applicants", use_container_width=True):
         sample_path = str(Path(__file__).parent / "sample_applicants.txt")
-        st.session_state.applicants = bias_rules.load_applicants(sample_path)
+        loaded = bias_rules.load_applicants(sample_path)
+        st.session_state.applicants = loaded[0] if isinstance(loaded, tuple) else loaded
         st.session_state.flagged_zips = list(bias_rules.default_zip_codes)
         st.session_state.results, st.session_state.summary = [], {}
         st.session_state.status_msg = f"Loaded {len(st.session_state.applicants)} sample applicants and 3 sample ZIP codes. Click Run Audit."
