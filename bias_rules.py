@@ -1,6 +1,6 @@
 # CS110 Group 6 - Algorithmic Hiring Bias Simulator & Audit Tool
 # File: bias_rules.py
-# Contributor: Crystal R.
+# Contributor: Contributors: Jasmine W., Crystal R., Leilani G., and Frankie A.P.
 #
 # Purpose: This is the "brain" of the app. It stores the hidden rules a biased
 #          resume-screening robot might use, loads the applicants from
@@ -28,7 +28,7 @@ import os
 # NOTE: This list is a hypothetical choice made for the simulation. It shows how
 # a ZIP code can act as a "proxy" for income. It is NOT a claim about the people
 # who live there.
-flagged_zip_codes = []
+flagged_zip_codes = ["98584", "98402", "98108"]
 
 # The numbers the screener uses. The sliders in main.py change these values.
 algorithm_rules = {
@@ -53,15 +53,15 @@ default_rules = {
     "gap_penalty": 25,
     "passing_score": 70,
 }
+default_zip_codes = ["98584", "98402", "98108"]
 
 # ---------------------------------------------------------------------------
 # EXPLANATION PANEL TEXT (Jasmine W. can edit these sentences)
 # ---------------------------------------------------------------------------
 simulation_note = (
-    "About this simulation: the applicants are made-up sample profiles, and the "
+    "About this simulation: the applicants are made-up sample profiles and the "
     "flagged ZIP codes are a hypothetical rule. Real screening software is "
-    "private, so no one outside the company can see its actual rules. That "
-    "secrecy is part of the problem."
+    "private, so outsiders cannot see its actual rules."
 )
 
 bias_explanations = {
@@ -92,9 +92,13 @@ bias_explanations = {
 # FUNCTIONS
 # ---------------------------------------------------------------------------
 def reset_rules():
-    """Put every algorithm rule back to the starting values."""
+    """Put every rule and the flagged ZIP list back to the starting values."""
     for rule in default_rules:
         algorithm_rules[rule] = default_rules[rule]
+
+    flagged_zip_codes.clear()
+    for zip_code in default_zip_codes:
+        flagged_zip_codes.append(zip_code)
 
 
 def get_data_file_path(filename):
@@ -173,55 +177,109 @@ def load_applicants(path):
     return applicants, problems
 
 
+# Plain labels for the four possible outcomes (shown in the "Audit flag" column).
+outcome_labels = {
+    "fair_pass": "Fair pass",
+    "passed_despite_penalty": "Passed despite penalty",
+    "fair_rejection": "Fair rejection (low skills)",
+    "wrongly_rejected": "Wrongly rejected (bias)",
+}
+
+
 def score_applicant(applicant):
-    """Apply the robot's rules to one applicant and return the results."""
+    """Apply the robot's rules to one applicant and return the results.
+
+    The four possible outcomes (compare the robot to a fair, skills-only screen):
+      fair_pass              - passed and lost no points
+      passed_despite_penalty - lost points but still passed (penalty did no harm)
+      fair_rejection         - rejected, and skills alone were below the bar too
+      wrongly_rejected       - skills alone would have passed, but penalties
+                               pushed the final score under the bar (the harm)
+    """
     rules = algorithm_rules
     final_score = applicant["base_score"]
     reasons = []
+    zip_hit = False
+    gap_hit = False
 
     # Rule 1: ZIP code proxy
     if applicant["zip"] in flagged_zip_codes:
         final_score = final_score - rules["zip_penalty"]
+        zip_hit = True
         reasons.append(
             "ZIP code " + applicant["zip"] + " is flagged (-"
             + str(rules["zip_penalty"]) + " points)"
         )
 
-    # Rule 2: employment gap
+    # Rule 2: employment gap (a gap equal to the limit is allowed)
     if applicant["gap_months"] > rules["max_gap_months"]:
         final_score = final_score - rules["gap_penalty"]
+        gap_hit = True
         reasons.append(
             str(applicant["gap_months"]) + "-month gap is over the "
             + str(rules["max_gap_months"]) + "-month limit (-"
             + str(rules["gap_penalty"]) + " points)"
         )
 
+    # A score cannot go below zero.
+    if final_score < 0:
+        final_score = 0
+
+    penalized = zip_hit or gap_hit
     robot_passed = final_score >= rules["passing_score"]
     # Would this person have passed if only their skills were judged?
     skills_passed = applicant["base_score"] >= rules["passing_score"]
 
+    if robot_passed and not penalized:
+        outcome = "fair_pass"
+    elif robot_passed:
+        outcome = "passed_despite_penalty"
+    elif not skills_passed:
+        outcome = "fair_rejection"
+    else:
+        outcome = "wrongly_rejected"
+
     result = {
         "applicant": applicant,
         "final_score": final_score,
+        "points_lost": applicant["base_score"] - final_score,
         "reasons": reasons,
+        "zip_hit": zip_hit,
+        "gap_hit": gap_hit,
+        "penalized": penalized,
         "robot_passed": robot_passed,
         "skills_passed": skills_passed,
+        "outcome": outcome,
         # Qualified on skills, but the robot rejected them anyway
-        "wrongly_filtered": skills_passed and not robot_passed,
+        "wrongly_filtered": outcome == "wrongly_rejected",
     }
     return result
+
+
+def percent(part, whole):
+    """Return part/whole as a percent rounded to 1 decimal (None if whole is 0)."""
+    if whole == 0:
+        return None
+    return round(part / whole * 100, 1)
 
 
 def run_audit(applicants):
     """Screen every applicant. Returns (list of results, summary dictionary)."""
     results = []
+    counts = {"fair_pass": 0, "passed_despite_penalty": 0,
+              "fair_rejection": 0, "wrongly_rejected": 0}
     passed = 0
     qualified = 0
     wrongly_filtered = []
+    penalized_total = 0
+    penalized_passed = 0
+    clean_total = 0
+    clean_passed = 0
 
     for applicant in applicants:
         result = score_applicant(applicant)
         results.append(result)
+        counts[result["outcome"]] += 1
 
         if result["robot_passed"]:
             passed += 1
@@ -230,9 +288,23 @@ def run_audit(applicants):
         if result["wrongly_filtered"]:
             wrongly_filtered.append(applicant["name"])
 
-    percent_lost = 0.0
-    if qualified > 0:
-        percent_lost = len(wrongly_filtered) / qualified * 100
+        # Compare applicants who lost points with applicants who did not.
+        if result["penalized"]:
+            penalized_total += 1
+            if result["robot_passed"]:
+                penalized_passed += 1
+        else:
+            clean_total += 1
+            if result["robot_passed"]:
+                clean_passed += 1
+
+    penalized_rate = percent(penalized_passed, penalized_total)
+    clean_rate = percent(clean_passed, clean_total)
+
+    # Impact ratio: pass rate of penalized applicants / pass rate of the rest.
+    impact_ratio = None
+    if penalized_rate is not None and clean_rate is not None and clean_rate > 0:
+        impact_ratio = round(penalized_rate / clean_rate, 2)
 
     summary = {
         "total": len(applicants),
@@ -240,9 +312,142 @@ def run_audit(applicants):
         "filtered": len(applicants) - passed,
         "qualified": qualified,
         "wrongly_filtered": wrongly_filtered,
-        "percent_lost": round(percent_lost, 1),
+        "percent_lost": percent(len(wrongly_filtered), qualified) or 0.0,
+        "counts": counts,
+        "penalized_total": penalized_total,
+        "penalized_passed": penalized_passed,
+        "penalized_rate": penalized_rate,
+        "clean_total": clean_total,
+        "clean_passed": clean_passed,
+        "clean_rate": clean_rate,
+        "impact_ratio": impact_ratio,
     }
     return results, summary
+
+
+def build_diagnostics_text(summary, results):
+    """Write the audit explanation as plain text (used by the app screen).
+
+    Only facts that are true for THIS run are printed, so the text changes
+    when the rules or the applicants change.
+    """
+    rules = algorithm_rules
+    total = summary["total"]
+    counts = summary["counts"]
+
+    if total == 0:
+        return "There are no applicants to screen."
+
+    lines = []
+
+    # --- The numbers ---
+    lines.append("THE NUMBERS")
+    lines.append(f"{total} applicant(s) screened: {summary['passed']} passed, "
+                 f"{summary['filtered']} filtered out.")
+    lines.append(f"{summary['qualified']} of {total} were qualified on skills alone "
+                 f"(skills score of {rules['passing_score']} or higher).")
+    lines.append("")
+
+    # --- What went right ---
+    lines.append("WHAT WENT RIGHT")
+    right_count = 0
+    if counts["fair_pass"] > 0:
+        lines.append(f"- {counts['fair_pass']} applicant(s) passed without losing any points.")
+        right_count += 1
+    for result in results:
+        applicant = result["applicant"]
+        if result["outcome"] == "passed_despite_penalty":
+            lines.append(f"- {applicant['name']} lost {result['points_lost']} points "
+                         f"but still passed (skills {applicant['base_score']}, "
+                         f"robot score {result['final_score']}). The penalty did not change the result.")
+            right_count += 1
+        elif result["outcome"] == "fair_rejection":
+            lines.append(f"- {applicant['name']} was rejected with a skills score of "
+                         f"{applicant['base_score']}, below the passing score of "
+                         f"{rules['passing_score']}. This rejection is not caused by bias.")
+            right_count += 1
+    if right_count == 0:
+        lines.append("- Nothing in this run: no one passed and no rejection was fair.")
+    lines.append("")
+
+    # --- What went wrong ---
+    lines.append("WHAT WENT WRONG")
+    wrong_count = counts["wrongly_rejected"]
+    if wrong_count == 0:
+        lines.append("- No qualified applicant was rejected because of a penalty in this run.")
+    else:
+        lines.append(f"- Qualified applicants rejected only because of penalties: "
+                     f"{wrong_count} of {summary['qualified']} ({summary['percent_lost']}%).")
+        for result in results:
+            if result["wrongly_filtered"]:
+                applicant = result["applicant"]
+                lines.append(f"  * {applicant['name']}: skills {applicant['base_score']}, "
+                             f"robot score {result['final_score']}. "
+                             + "; ".join(result["reasons"]) + ".")
+                if applicant["note"] != "":
+                    lines.append(f"    Background: {applicant['note']}")
+    lines.append("")
+
+    # --- Pass rates ---
+    lines.append("PASS RATES")
+    if summary["penalized_total"] > 0:
+        lines.append(f"- With at least one penalty: {summary['penalized_passed']} of "
+                     f"{summary['penalized_total']} passed ({summary['penalized_rate']}%).")
+    else:
+        lines.append("- No applicant lost points in this run.")
+    if summary["clean_total"] > 0:
+        lines.append(f"- With no penalties: {summary['clean_passed']} of "
+                     f"{summary['clean_total']} passed ({summary['clean_rate']}%).")
+    else:
+        lines.append("- Every applicant lost points in this run.")
+
+    ratio = summary["impact_ratio"]
+    if ratio is not None:
+        if ratio < 0.8:
+            verdict = ("That is below 0.80, which the U.S. 'four-fifths' rule of thumb "
+                       "treats as a warning sign of adverse impact.")
+        else:
+            verdict = "That is 0.80 or higher, so the four-fifths rule of thumb would not flag it."
+        lines.append(f"- Ratio of the two pass rates: {ratio}. {verdict}")
+        lines.append("  (The four-fifths rule was written for race, sex and ethnic groups. "
+                     "Here it is only an illustration.)")
+    elif summary["penalized_total"] > 0 and summary["clean_total"] > 0:
+        lines.append("- No applicant without a penalty passed, so no ratio can be calculated.")
+    else:
+        lines.append("- Both groups need at least one applicant to compare pass rates.")
+    if total < 30:
+        lines.append(f"- Small sample: with only {total} applicant(s), one person changes the "
+                     "percentages a lot. Treat these numbers as an illustration, not proof.")
+    lines.append("")
+
+    # --- Why it happens (only the causes that actually hurt someone) ---
+    harmed_by_zip = False
+    harmed_by_gap = False
+    for result in results:
+        if result["wrongly_filtered"]:
+            if result["zip_hit"]:
+                harmed_by_zip = True
+            if result["gap_hit"]:
+                harmed_by_gap = True
+
+    if harmed_by_zip or harmed_by_gap:
+        lines.append("WHY THIS HAPPENS")
+        if harmed_by_gap:
+            lines.append(bias_explanations["Medical gaps"])
+            lines.append("")
+            lines.append(bias_explanations["Neurodivergent applicants"])
+            lines.append("")
+        if harmed_by_zip:
+            lines.append(bias_explanations["Low-income applicants"])
+            lines.append("")
+    else:
+        lines.append("TRY THIS")
+        lines.append("Raise a penalty, lower the gap limit, or flag another ZIP code, "
+                     "then run the audit again to see who starts getting hurt.")
+        lines.append("")
+
+    lines.append(simulation_note)
+    return "\n".join(lines)
 
 
 def save_report(path, results, summary):
@@ -268,6 +473,8 @@ def save_report(path, results, summary):
             "skills_score": applicant["base_score"],
             "final_score": result["final_score"],
             "outcome": outcome,
+            "audit_result": outcome_labels[result["outcome"]],
+            "points_lost": result["points_lost"],
             "qualified_but_filtered": result["wrongly_filtered"],
             "penalties": result["reasons"],
         })
