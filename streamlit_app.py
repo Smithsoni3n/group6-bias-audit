@@ -30,30 +30,9 @@ def sync_rules():
     bias_rules.flagged_zip_codes.extend(st.session_state.flagged_zips)
 
 def build_diagnostics(summary, results):
-    lines = [
-        "AUDIT SUMMARY",
-        f"Total applicants: {summary.get('total', 0)}",
-        f"Passed the robot: {summary.get('passed', 0)}",
-        f"Filtered out by the robot: {summary.get('filtered', 0)}",
-        f"Qualified on skills alone: {summary.get('qualified', 0)}",
-        f"Qualified but wrongly filtered: {len(summary.get('wrongly_filtered', ()))}",
-        f"{summary.get('percent_lost', 0.0)}% of qualified applicants were lost to proxy penalties.\n",
-    ]
-    if summary.get("wrongly_filtered"):
-        lines.append("WHO WAS WRONGLY FILTERED, AND WHY")
-        for r in results:
-            if r.get("wrongly_filtered"):
-                a = r.get("applicant", {})
-                lines.append(f"- {a.get('name', '')} (skills {a.get('base_score', 0)}, robot score {r.get('final_score', 0)})")
-                lines.extend([f"    Penalty: {reason}" for reason in r.get("reasons", ())])
-                if a.get("note"):
-                    lines.append(f"    Background: {a.get('note')}")
-        lines.append("")
-    lines.append("WHY THIS MATTERS")
-    for topic, exp in bias_rules.bias_explanations.items():
-        lines.extend([f"{topic}: {exp}", ""])
-    lines.append(bias_rules.simulation_note)
-    return "\n".join(lines)
+    # The wording lives in bias_rules.py so the desktop app (main.py) and this
+    # web preview always say the same thing.
+    return bias_rules.build_diagnostics_text(summary, results)
 
 st.title("Algorithmic Hiring Bias Simulator & Audit Tool")
 st.caption("Change the robot's rules, then see who it filters out.")
@@ -82,7 +61,7 @@ with c3:
     if st.session_state.results:
         sync_rules()
         rep = {"rules_used": dict(bias_rules.algorithm_rules), "flagged_zip_codes": list(bias_rules.flagged_zip_codes), "summary": st.session_state.summary, "applicants": [
-            {"name": r["applicant"]["name"], "zip": r["applicant"]["zip"], "gap_months": r["applicant"]["gap_months"], "skills_score": r["applicant"]["base_score"], "final_score": r["final_score"], "outcome": "PASSED" if r["robot_passed"] else "FILTERED OUT", "qualified_but_filtered": r["wrongly_filtered"], "penalties": r["reasons"]}
+            {"name": r["applicant"]["name"], "zip": r["applicant"]["zip"], "gap_months": r["applicant"]["gap_months"], "skills_score": r["applicant"]["base_score"], "final_score": r["final_score"], "audit_result": bias_rules.outcome_labels[r["outcome"]], "points_lost": r["points_lost"], "outcome": "PASSED" if r["robot_passed"] else "FILTERED OUT", "qualified_but_filtered": r["wrongly_filtered"], "penalties": r["reasons"]}
             for r in st.session_state.results
         ]}
         st.download_button("Export Report (JSON)", data=json.dumps(rep, indent=4), file_name="audit_report.json", mime="application/json", use_container_width=True)
@@ -128,7 +107,7 @@ with left:
         with st.form("app_form", clear_on_submit=True):
             n_val, z_val, g_val, s_val = st.text_input("Name"), st.text_input("ZIP code"), st.text_input("Gap (months)"), st.text_input("Skills score (0-100)")
             if st.form_submit_button("Add Applicant", use_container_width=True):
-                app, err = bias_rules.make_applicant(n_val, z_val, g_val, s_val, "Applicant added by the user")
+                app, err = bias_rules.make_applicant(n_val, z_val, g_val, s_val, "")
                 if err:
                     st.error(err)
                 else:
@@ -142,7 +121,7 @@ with right:
     if not st.session_state.results:
         rows = [{"Applicant": a["name"], "ZIP": a["zip"], "Gap (mo)": a["gap_months"], "Skills": a["base_score"], "Final": "-", "Result": "Not screened yet", "Audit flag": ""} for a in st.session_state.applicants]
     else:
-        rows = [{"Applicant": r["applicant"]["name"], "ZIP": r["applicant"]["zip"], "Gap (mo)": r["applicant"]["gap_months"], "Skills": r["applicant"]["base_score"], "Final": r["final_score"], "Result": "PASSED" if r["robot_passed"] else "FILTERED OUT", "Audit flag": "Qualified but rejected" if r["wrongly_filtered"] else ("Below passing on skills" if not r["skills_passed"] else "")} for r in st.session_state.results]
+        rows = [{"Applicant": r["applicant"]["name"], "ZIP": r["applicant"]["zip"], "Gap (mo)": r["applicant"]["gap_months"], "Skills": r["applicant"]["base_score"], "Final": r["final_score"], "Result": "PASSED" if r["robot_passed"] else "FILTERED OUT", "Audit flag": bias_rules.outcome_labels[r["outcome"]]} for r in st.session_state.results]
     st.dataframe(rows, use_container_width=True, hide_index=True)
 
     st.subheader("Bias Diagnostics & Explanation")
