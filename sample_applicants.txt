@@ -1,0 +1,4 @@
+Crystal R., 98584, 2, 85, low-income applicant (flagged ZIP code)
+Leilani G., 98312, 8, 88, medical gap (long employment gap)
+Jasmine W., 98312, 7, 90, neurodivergent applicant (long employment gap)
+Frankie A.P., 98312, 3, 82, no proxy flags
