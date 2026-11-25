@@ -1,6 +1,6 @@
 # CS110 Group 6 - Algorithmic Hiring Bias Simulator & Audit Tool
 # File: bias_rules.py
-# Contributors: Crystal R, Leilani G, Jasmine W & Frankie A.P.
+# Contributor:
 #
 # Purpose: This is the "brain" of the app. It stores the hidden rules a biased
 #          resume-screening algorithm might use, loads the applicants from
@@ -16,7 +16,6 @@
 #   - json (saving the audit report) and os (finding the data file's folder):
 #     Python Software Foundation (n.d.-d, n.d.-e).
 
-
 import json
 import os
 
@@ -31,6 +30,8 @@ import os
 flagged_zip_codes = ["98584", "98402", "98108"]
 
 # The numbers the screener uses. The sliders in main.py change these values.
+# Contributors: Crystal R, Leilani G, Jasmine W & Frankie A.P.
+
 algorithm_rules = {
     "max_gap_months": 6,   # employment gaps longer than this get penalized
     "zip_penalty": 20,     # points removed for living in a flagged ZIP code
@@ -203,8 +204,8 @@ def score_applicant(applicant):
     zip_hit = False
     gap_hit = False
 
-    # Rule 1: ZIP code proxy
-    if applicant["zip"] in flagged_zip_codes:
+    # Rule 1: ZIP code proxy (a penalty of 0 points changes nothing, so it is skipped)
+    if applicant["zip"] in flagged_zip_codes and rules["zip_penalty"] > 0:
         final_score = final_score - rules["zip_penalty"]
         zip_hit = True
         penalty_parts.append(("flagged ZIP code " + applicant["zip"], rules["zip_penalty"]))
@@ -214,7 +215,7 @@ def score_applicant(applicant):
         )
 
     # Rule 2: employment gap (a gap equal to the limit is allowed)
-    if applicant["gap_months"] > rules["max_gap_months"]:
+    if applicant["gap_months"] > rules["max_gap_months"] and rules["gap_penalty"] > 0:
         final_score = final_score - rules["gap_penalty"]
         gap_hit = True
         penalty_parts.append((str(applicant["gap_months"]) + "-month gap, limit "
